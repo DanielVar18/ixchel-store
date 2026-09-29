@@ -91,19 +91,28 @@ const accounts=Array.isArray(saved&&saved.accounts)?saved.accounts:[];
 const orders=Array.isArray(saved&&saved.orders)?saved.orders:[];
 const bag=[]; let uid=saved&&saved.uid||0; let guestBag=Array.isArray(saved&&saved.guestBag)?saved.guestBag:[];
 let user=saved&&saved.session?accounts.find(a=>a.email===saved.session)||null:null;
+if(user&&!user.token)user=null;
 (user?(user.bag||[]):guestBag).forEach(l=>bag.push(l));
 const notified=new Set();
-async function hashPass(email,pass){
-  const buf=await crypto.subtle.digest("SHA-256",new TextEncoder().encode("ixchel|"+email+"|"+pass));
-  return [...new Uint8Array(buf)].map(b=>b.toString(16).padStart(2,"0")).join("");
+async function api(path,payload){
+  let r;
+  try{ r=await fetch("api/"+path,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload||{})}); }
+  catch(e){ throw new Error("No hay conexión con la base de datos."); }
+  const data=await r.json().catch(()=>({ok:false,error:"Respuesta inválida del servidor."}));
+  if(!r.ok||!data.ok) throw new Error(data.error||"No se pudo guardar.");
+  return data;
 }
-function persist(){
+function persist(opts){
   if(user){
     user.bag=bag.map(l=>({...l}));
     const i=accounts.findIndex(a=>a.email===user.email);
     if(i>=0)accounts[i]=user;
   }else guestBag=bag.map(l=>({...l}));
   try{ localStorage.setItem(STORE_KEY,JSON.stringify({accounts,session:user?user.email:null,guestBag:user?[]:guestBag,orders,uid})); }catch(e){}
+  if(user&&user.token){
+    const payload={token:user.token,bag:bag.map(l=>({...l})),licenses:user.licenses||[],addons:user.addons||[],orders:orders.filter(o=>o.email===user.email),event:opts&&opts.event||""};
+    clearTimeout(persist._t); persist._t=setTimeout(()=>{api("sync.php",payload).catch(()=>{})},300);
+  }
 }
 function mergeIntoBag(items){
   items.forEach(g=>{
@@ -117,15 +126,19 @@ function mergeIntoBag(items){
   });
 }
 function enterUser(acc){
-  const incoming=bag.map(l=>({...l}));
   bag.length=0; (acc.bag||[]).forEach(l=>bag.push({...l}));
-  mergeIntoBag(incoming); guestBag=[]; user=acc; acc.licenses=acc.licenses||[]; acc.addons=acc.addons||[];
+  guestBag=[]; acc.licenses=acc.licenses||[]; acc.addons=acc.addons||[];
+  const i=accounts.findIndex(a=>a.email===acc.email);
+  if(i>=0)accounts[i]=acc; else accounts.push(acc);
+  user=acc;
+  (acc.orders||[]).forEach(o=>{ if(!orders.some(x=>x.id===o.id)) orders.push(o); });
   persist();
 }
 function leaveUser(){
-  if(user)user.bag=bag.map(l=>({...l}));
+  const token=user&&user.token;
   user=null; bag.length=0; guestBag.forEach(l=>bag.push({...l}));
   persist();
+  if(token) api("logout.php",{token}).catch(()=>{});
 }
 const planUI={medigo:{cyc:"y",q:1},nursego:{cyc:"y",q:1}};
 const addonMonths={}; let prof="medigo", catGo="medigo";
@@ -313,13 +326,13 @@ document.addEventListener("click",e=>{
 function authHTML(mode,pfx){
   const seg=`<div class="auth-seg"><div class="seg" role="tablist"><button type="button" role="tab" data-auth="register" data-pfx="${pfx}" aria-selected="${mode==="register"}">Crear cuenta</button><button type="button" role="tab" data-auth="login" data-pfx="${pfx}" aria-selected="${mode==="login"}">Iniciar sesión</button></div></div>`;
   if(mode==="register")return seg+`<form class="auth-form" data-authform="register" data-pfx="${pfx}" novalidate>
-    <div class="field" id="f-${pfx}n"><label for="${pfx}n">Nombre completo</label><input id="${pfx}n" autocomplete="name"><span class="err">Escribe tu nombre completo.</span></div>
-    <div class="field" id="f-${pfx}e"><label for="${pfx}e">Correo electrónico</label><input id="${pfx}e" type="email" autocomplete="email"><span class="err" id="${pfx}eErr">Escribe un correo válido, por ejemplo nombre@dominio.mx.</span></div>
-    <div class="grid2"><div class="field"><label for="${pfx}c">Cédula profesional <span style="color:var(--ink-3)">(opcional)</span></label><input id="${pfx}c" inputmode="numeric"></div><div class="field"><label for="${pfx}u">Unidad o consultorio <span style="color:var(--ink-3)">(opcional)</span></label><input id="${pfx}u"></div></div>
-    <div class="field" id="f-${pfx}p"><label for="${pfx}p">Contraseña</label><input id="${pfx}p" type="password" autocomplete="new-password"><span class="hint">Mínimo 8 caracteres con al menos un número.</span><span class="err">La contraseña necesita 8 caracteres y al menos un número.</span></div>
-    <div class="field" id="f-${pfx}p2"><label for="${pfx}p2">Confirma la contraseña</label><input id="${pfx}p2" type="password" autocomplete="new-password"><span class="err">Las contraseñas no coinciden.</span></div>
+    <div class="field" id="f-${pfx}n"><label for="${pfx}n">Nombre completo</label><input id="${pfx}n" autocomplete="name" required><span class="err">Escribe tu nombre completo.</span></div>
+    <div class="field" id="f-${pfx}e"><label for="${pfx}e">Correo electrónico</label><input id="${pfx}e" type="email" autocomplete="email" required><span class="err" id="${pfx}eErr">Escribe un correo válido, por ejemplo nombre@dominio.mx.</span></div>
+    <div class="grid2"><div class="field"><label for="${pfx}c">Cédula profesional <span style="color:var(--ink-3)">(opcional)</span></label><input id="${pfx}c" inputmode="numeric"></div><div class="field" id="f-${pfx}u"><label for="${pfx}u">Unidad o consultorio</label><input id="${pfx}u" required><span class="err">Escribe tu unidad o consultorio.</span></div></div>
+    <div class="field" id="f-${pfx}p"><label for="${pfx}p">Contraseña</label><input id="${pfx}p" type="password" autocomplete="new-password" required><span class="hint">Mínimo 8 caracteres con al menos un número.</span><span class="err">La contraseña necesita 8 caracteres y al menos un número.</span></div>
+    <div class="field" id="f-${pfx}p2"><label for="${pfx}p2">Confirma la contraseña</label><input id="${pfx}p2" type="password" autocomplete="new-password" required><span class="err">Las contraseñas no coinciden.</span></div>
     <button class="btn wide" type="submit">Crear cuenta</button>
-    <p class="auth-note">Tu cuenta y tu bolsa quedan guardadas en este navegador. Puedes cerrar la página y volver a entrar.</p></form>`;
+    <p class="auth-note">Todos los campos son obligatorios, excepto la cédula. La cuenta se guarda y se avisa a gerencia@ix-chel.com.mx.</p></form>`;
   return seg+`<form class="auth-form" data-authform="login" data-pfx="${pfx}" novalidate>
     <div class="field" id="f-${pfx}le"><label for="${pfx}le">Correo electrónico</label><input id="${pfx}le" type="email" autocomplete="email"><span class="err">Escribe un correo válido.</span></div>
     <div class="field" id="f-${pfx}lp"><label for="${pfx}lp">Contraseña</label><input id="${pfx}lp" type="password" autocomplete="current-password"><span class="err" id="${pfx}lpErr">Escribe tu contraseña.</span></div>
@@ -336,24 +349,34 @@ document.addEventListener("click",e=>{
 document.addEventListener("submit",async e=>{
   const f=e.target.closest("[data-authform]"); if(!f)return; e.preventDefault();
   const pfx=f.dataset.pfx;
+  const btn=f.querySelector('[type="submit"]'); if(btn)btn.disabled=true;
+  try{
   if(f.dataset.authform==="register"){
-    const n=val(pfx+"n"),em=val(pfx+"e").toLowerCase(),p=$("#"+pfx+"p").value,p2=$("#"+pfx+"p2").value;
-    const exists=accounts.some(a=>a.email===em);
-    $("#"+pfx+"eErr").textContent=exists?"Ya existe una cuenta con este correo. Inicia sesión.":"Escribe un correo válido, por ejemplo nombre@dominio.mx.";
-    const x=[bad(pfx+"n",n.split(/\s+/).length<2),bad(pfx+"e",!EMAIL.test(em)||exists),bad(pfx+"p",p.length<8||!/\d/.test(p)),bad(pfx+"p2",p!==p2||!p2)];
+    const n=val(pfx+"n"),em=val(pfx+"e").toLowerCase(),unit=val(pfx+"u"),p=$("#"+pfx+"p").value,p2=$("#"+pfx+"p2").value;
+    $("#"+pfx+"eErr").textContent="Escribe un correo válido, por ejemplo nombre@dominio.mx.";
+    const x=[bad(pfx+"n",n.split(/\s+/).length<2),bad(pfx+"e",!EMAIL.test(em)),bad(pfx+"u",unit.length<2),bad(pfx+"p",p.length<8||!/\d/.test(p)),bad(pfx+"p2",p!==p2||!p2)];
     if(x.some(Boolean)){const i=f.querySelector(".bad input");i&&i.focus();return}
-    const acc={name:n,email:em,ced:val(pfx+"c"),unit:val(pfx+"u"),passHash:await hashPass(em,p),licenses:[],addons:[],bag:[]};
-    accounts.push(acc); enterUser(acc);
-    toast(`Cuenta creada. Hola, ${n.split(" ")[0]}.`);
+    const snapshot=bag.map(l=>({...l}));
+    const data=await api("register.php",{name:n,email:em,password:p,cedula:val(pfx+"c"),unit,bag:snapshot});
+    enterUser(data.user);
+    toast(data.mailed?`Cuenta creada. Hola, ${n.split(" ")[0]}.`:`Cuenta creada, ${n.split(" ")[0]}. Quedó guardada; el aviso a gerencia no se pudo enviar.`);
   }else{
     const em=val(pfx+"le").toLowerCase(),p=$("#"+pfx+"lp").value;
     if(bad(pfx+"le",!EMAIL.test(em)))return;
-    const acc=accounts.find(a=>a.email===em);
-    const ok=acc&&acc.passHash===await hashPass(em,p);
-    $("#"+pfx+"lpErr").textContent=acc?"La contraseña no es correcta.":"No encontramos una cuenta con ese correo. Crea una cuenta.";
-    if(bad(pfx+"lp",!ok))return;
-    enterUser(acc); toast(`Hola de nuevo, ${acc.name.split(" ")[0]}.`);
+    if(bad(pfx+"lp",!p))return;
+    const guestNow=bag.map(l=>({...l}));
+    let data;
+    try{ data=await api("login.php",{email:em,password:p}); }
+    catch(err){ $("#"+pfx+"lpErr").textContent=err.message; bad(pfx+"lp",true); return; }
+    enterUser(data.user);
+    if(guestNow.length){ mergeIntoBag(guestNow); persist(); }
+    toast(`Hola de nuevo, ${data.user.name.split(" ")[0]}.`);
   }
+  }catch(err){
+    if(f.dataset.authform==="register" && /correo/i.test(err.message)){ $("#"+pfx+"eErr").textContent=err.message; bad(pfx+"e",true); }
+    else toast(err.message);
+    return;
+  }finally{ if(btn)btn.disabled=false; }
   renderAcctBtn(); renderDl(); renderBagBtn();
   if(pfx==="a"){ renderAccount(); if(pending){const p=pending;pending=null;setTimeout(p,300)} } else renderStore();
 });
@@ -535,7 +558,7 @@ function doPay(){
       return{t:i.t,d:i.d,s:lineTotal(l),icon:lineIcon(l),pre:l.type==="addon"}});
     st.last={id:"IX-"+d.getFullYear()+"-"+String(Math.floor(Math.random()*90000)+10000),date:d.toLocaleDateString("es-MX",{day:"numeric",month:"long",year:"numeric"}),
       email:user.email,lines,s:x.s,iva:x.iva,total:x.t,pay:st.pay,payL:{card:"Tarjeta vía pasarela",spei:"Transferencia SPEI",cash:"Efectivo en tiendas",msi:"Meses sin intereses"}[st.pay],fact:st.fact,rfc:st.rfc,uso:st.uso,keys};
-    orders.push(st.last); bag.length=0; persist(); renderBagBtn(); renderBPlans(); renderAddons(); renderDl(); go(4);
+    orders.push(st.last); bag.length=0; persist({event:"order"}); renderBagBtn(); renderBPlans(); renderAddons(); renderDl(); go(4);
   },reduce?0:900);
 }
 
@@ -550,4 +573,13 @@ document.addEventListener("click",e=>{const p=$("#pop"); if(p.classList.contains
 
 addEventListener("scroll",()=>{const p=$("#pop"); if(p.classList.contains("on")&&Math.abs(scrollY-(p._y||0))>320)p.classList.remove("on");},{passive:true});
 renderAcctBtn(); renderBagBtn(); renderBPlans(); renderCatSeg(); renderCatalog(); renderProfSeg(); renderAddons(); renderDl();
+if(user&&user.token){
+  api("session.php",{token:user.token}).then(data=>{
+    enterUser(data.user);
+    renderAcctBtn(); renderBagBtn(); renderBPlans(); renderAddons(); renderDl();
+  }).catch(()=>{
+    user=null; bag.length=0; persist();
+    renderAcctBtn(); renderBagBtn(); renderBPlans(); renderAddons(); renderDl();
+  });
+}
 })();

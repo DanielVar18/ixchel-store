@@ -1,3 +1,6 @@
 Thumbs.db
 Desktop.ini
 .DS_Store
+api/data/*.sqlite
+api/data/*.sqlite-wal
+api/data/*.sqlite-shm
