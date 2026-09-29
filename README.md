@@ -21,4 +21,4 @@ El archivo `.nojekyll` evita que GitHub Pages ignore carpetas de assets.
 - `js/store.js` — tienda, cuenta y bolsa (solo en el navegador, no se guarda)
 - `assets/` — logotipos y pantallas
 
-Precios, cuentas, pagos y descargas son una demostración: no hay servidor ni cobro real.
+No hay servidor ni cobro real. Las cuentas y la bolsa se guardan en el navegador de cada persona.

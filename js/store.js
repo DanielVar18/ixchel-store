@@ -83,9 +83,50 @@ const MONTHS=[1,3,6,12];
 const addonPrice=(p,m)=>m===12?p*10:p*m;
 const DOCS={priv:"Aviso de privacidad",conf:"Acuerdo de confidencialidad",pi:"Propiedad intelectual y licencia de uso"};
 
-/* ================= state (memoria de la página) ================= */
-const accounts=[]; let user=null; const orders=[]; const notified=new Set();
-const bag=[]; let uid=0;
+/* ================= state (se guarda en este navegador) ================= */
+const STORE_KEY="ixchel.store.v1";
+function readStore(){ try{ return JSON.parse(localStorage.getItem(STORE_KEY))||null; }catch(e){ return null; } }
+const saved=readStore();
+const accounts=Array.isArray(saved&&saved.accounts)?saved.accounts:[];
+const orders=Array.isArray(saved&&saved.orders)?saved.orders:[];
+const bag=[]; let uid=saved&&saved.uid||0; let guestBag=Array.isArray(saved&&saved.guestBag)?saved.guestBag:[];
+let user=saved&&saved.session?accounts.find(a=>a.email===saved.session)||null:null;
+(user?(user.bag||[]):guestBag).forEach(l=>bag.push(l));
+const notified=new Set();
+async function hashPass(email,pass){
+  const buf=await crypto.subtle.digest("SHA-256",new TextEncoder().encode("ixchel|"+email+"|"+pass));
+  return [...new Uint8Array(buf)].map(b=>b.toString(16).padStart(2,"0")).join("");
+}
+function persist(){
+  if(user){
+    user.bag=bag.map(l=>({...l}));
+    const i=accounts.findIndex(a=>a.email===user.email);
+    if(i>=0)accounts[i]=user;
+  }else guestBag=bag.map(l=>({...l}));
+  try{ localStorage.setItem(STORE_KEY,JSON.stringify({accounts,session:user?user.email:null,guestBag:user?[]:guestBag,orders,uid})); }catch(e){}
+}
+function mergeIntoBag(items){
+  items.forEach(g=>{
+    if(g.type==="plan"){
+      const ex=bag.find(l=>l.type==="plan"&&l.go===g.go);
+      if(ex){ex.cyc=g.cyc;ex.q=Math.min(20,ex.q+g.q);} else bag.push({...g,id:++uid});
+    }else{
+      const ex=bag.find(l=>l.type==="addon"&&l.go===g.go&&l.k===g.k);
+      if(ex)ex.months=g.months; else bag.push({...g,id:++uid});
+    }
+  });
+}
+function enterUser(acc){
+  const incoming=bag.map(l=>({...l}));
+  bag.length=0; (acc.bag||[]).forEach(l=>bag.push({...l}));
+  mergeIntoBag(incoming); guestBag=[]; user=acc; acc.licenses=acc.licenses||[]; acc.addons=acc.addons||[];
+  persist();
+}
+function leaveUser(){
+  if(user)user.bag=bag.map(l=>({...l}));
+  user=null; bag.length=0; guestBag.forEach(l=>bag.push({...l}));
+  persist();
+}
 const planUI={medigo:{cyc:"y",q:1},nursego:{cyc:"y",q:1}};
 const addonMonths={}; let prof="medigo", catGo="medigo";
 const st={step:0,terms:{priv:false,conf:false,pi:false},fact:true,rfc:"",cp:"",razon:"",reg:"612 · Personas físicas con actividades empresariales y profesionales",uso:"G03 · Gastos en general",pay:"card",last:null};
@@ -98,6 +139,7 @@ function addPlan(go,cyc,q){
   const ex=bag.find(l=>l.type==="plan"&&l.go===go);
   if(ex){ex.cyc=cyc;ex.q=Math.min(20,ex.q+q)} else bag.push({id:++uid,type:"plan",go,cyc,q});
   afterAdd({img:IMG[go],t:`${PROD[go].n} · Plan básico`,d:`${cyc==="y"?"Anual":"Mensual"} · ${q} licencia${q>1?"s":""}`});
+  persist();
 }
 function addAddon(go,k,months){
   const a=ADDONS[go].find(x=>x.k===k);
@@ -105,6 +147,7 @@ function addAddon(go,k,months){
   if(ex)ex.months=months; else bag.push({id:++uid,type:"addon",go,k,months});
   const needs=!hasBase(go);
   afterAdd({img:IMG[go],t:a.n,d:`${PROD[go].n} · ${months} ${months>1?"meses":"mes"}`,needs:needs?go:null});
+  persist();
 }
 function afterAdd(info){
   renderBagBtn(); renderAddons(); renderBPlans();
@@ -276,7 +319,7 @@ function authHTML(mode,pfx){
     <div class="field" id="f-${pfx}p"><label for="${pfx}p">Contraseña</label><input id="${pfx}p" type="password" autocomplete="new-password"><span class="hint">Mínimo 8 caracteres con al menos un número.</span><span class="err">La contraseña necesita 8 caracteres y al menos un número.</span></div>
     <div class="field" id="f-${pfx}p2"><label for="${pfx}p2">Confirma la contraseña</label><input id="${pfx}p2" type="password" autocomplete="new-password"><span class="err">Las contraseñas no coinciden.</span></div>
     <button class="btn wide" type="submit">Crear cuenta</button>
-    <p class="auth-note">Modelo de demostración: la cuenta existe solo mientras esta página está abierta.</p></form>`;
+    <p class="auth-note">Tu cuenta y tu bolsa quedan guardadas en este navegador. Puedes cerrar la página y volver a entrar.</p></form>`;
   return seg+`<form class="auth-form" data-authform="login" data-pfx="${pfx}" novalidate>
     <div class="field" id="f-${pfx}le"><label for="${pfx}le">Correo electrónico</label><input id="${pfx}le" type="email" autocomplete="email"><span class="err">Escribe un correo válido.</span></div>
     <div class="field" id="f-${pfx}lp"><label for="${pfx}lp">Contraseña</label><input id="${pfx}lp" type="password" autocomplete="current-password"><span class="err" id="${pfx}lpErr">Escribe tu contraseña.</span></div>
@@ -290,7 +333,7 @@ document.addEventListener("click",e=>{
   const pfx=b.dataset.pfx, box=authTargets[pfx](); if(pfx==="a")acctMode=b.dataset.auth;
   vt(()=>{box.innerHTML=authHTML(b.dataset.auth,pfx)}); setTimeout(()=>{const i=box.querySelector("input");i&&i.focus()},60);
 });
-document.addEventListener("submit",e=>{
+document.addEventListener("submit",async e=>{
   const f=e.target.closest("[data-authform]"); if(!f)return; e.preventDefault();
   const pfx=f.dataset.pfx;
   if(f.dataset.authform==="register"){
@@ -299,17 +342,19 @@ document.addEventListener("submit",e=>{
     $("#"+pfx+"eErr").textContent=exists?"Ya existe una cuenta con este correo. Inicia sesión.":"Escribe un correo válido, por ejemplo nombre@dominio.mx.";
     const x=[bad(pfx+"n",n.split(/\s+/).length<2),bad(pfx+"e",!EMAIL.test(em)||exists),bad(pfx+"p",p.length<8||!/\d/.test(p)),bad(pfx+"p2",p!==p2||!p2)];
     if(x.some(Boolean)){const i=f.querySelector(".bad input");i&&i.focus();return}
-    const acc={name:n,email:em,ced:val(pfx+"c"),unit:val(pfx+"u"),pass:p,licenses:[],addons:[]}; accounts.push(acc); user=acc;
+    const acc={name:n,email:em,ced:val(pfx+"c"),unit:val(pfx+"u"),passHash:await hashPass(em,p),licenses:[],addons:[],bag:[]};
+    accounts.push(acc); enterUser(acc);
     toast(`Cuenta creada. Hola, ${n.split(" ")[0]}.`);
   }else{
     const em=val(pfx+"le").toLowerCase(),p=$("#"+pfx+"lp").value;
     if(bad(pfx+"le",!EMAIL.test(em)))return;
-    const acc=accounts.find(a=>a.email===em&&a.pass===p);
-    $("#"+pfx+"lpErr").textContent=accounts.some(a=>a.email===em)?"La contraseña no es correcta.":"No encontramos una cuenta con ese correo. Crea una cuenta.";
-    if(bad(pfx+"lp",!acc))return;
-    user=acc; toast(`Hola de nuevo, ${acc.name.split(" ")[0]}.`);
+    const acc=accounts.find(a=>a.email===em);
+    const ok=acc&&acc.passHash===await hashPass(em,p);
+    $("#"+pfx+"lpErr").textContent=acc?"La contraseña no es correcta.":"No encontramos una cuenta con ese correo. Crea una cuenta.";
+    if(bad(pfx+"lp",!ok))return;
+    enterUser(acc); toast(`Hola de nuevo, ${acc.name.split(" ")[0]}.`);
   }
-  renderAcctBtn(); renderDl();
+  renderAcctBtn(); renderDl(); renderBagBtn();
   if(pfx==="a"){ renderAccount(); if(pending){const p=pending;pending=null;setTimeout(p,300)} } else renderStore();
 });
 const lbl=t=>`<p style="font-size:13px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-3)">${t}</p>`;
@@ -317,14 +362,20 @@ function renderAccount(){
   const box=$("#acctBody");
   if(!user){ box.innerHTML=authHTML(acctMode,"a"); return; }
   const lic=user.licenses, ad=user.addons, my=orders.filter(o=>o.email===user.email);
+  const bagBlock=bag.length?`<div style="margin-top:22px">${lbl("Tu bolsa")}
+   ${bag.map(l=>{const i=lineInfo(l);return `<div class="lic">${lineIcon(l)}<div><b>${esc(i.t)}</b><span>${esc(i.d)} · ${fmt(lineTotal(l))}</span></div></div>`}).join("")}
+   <button class="btn m" id="acctBag" style="margin-top:14px">Revisar bolsa y comprar</button></div>`:
+   `<div class="empty" style="margin-top:22px"><b>Tu bolsa está vacía.</b><span>Lo que agregues se guarda en tu cuenta.</span><a class="btn m" href="#planes" data-close>Ver planes</a></div>`;
   box.innerHTML=`<div class="profile"><span class="big-av">${esc(initials(user.name))}</span><div><b>${esc(user.name)}</b><span>${esc(user.email)}</span>${user.ced?`<br><span>Cédula ${esc(user.ced)}</span>`:""}</div></div>
+   ${bagBlock}
    <div style="margin-top:22px">${lbl("Mis licencias")}
    ${lic.length?lic.map(l=>`<div class="lic"><span class="appicon"><img src="${IMG[l.p]}" alt=""></span><div><b>${l.n}</b><span>${l.plan}</span><br><code>${l.key}</code> <button class="linkbtn" style="font-size:13px" data-copy="${l.key}">Copiar</button></div></div>`).join(""):
    `<div class="empty"><b>Aún no tienes licencias.</b><span>Compra un plan básico o empieza la prueba de 30 días.</span><div class="cta-row"><a class="btn m" href="#planes" data-close>Ver planes</a><button class="btn m ghost" data-trial="medigo">Probar MediGO</button></div></div>`}</div>
    ${ad.length?`<div style="margin-top:22px">${lbl("Complementos · preventa")}${ad.map(a=>`<div class="lic" style="grid-template-columns:52px 1fr"><span class="appicon"><img src="${IMG[a.go]}" alt=""></span><div><b>${a.n}</b><span>${PROD[a.go].n} · ${a.months} ${a.months>1?"meses":"mes"} · se activa al lanzamiento</span></div></div>`).join("")}</div>`:""}
    ${my.length?`<div style="margin-top:22px">${lbl("Pedidos")}${my.map(o=>`<div class="lic" style="grid-template-columns:1fr auto"><div><b class="num">${o.id}</b><span>${o.date} · ${o.lines.length} artículo${o.lines.length>1?"s":""}</span></div><b class="num">${fmt(o.total)}</b></div>`).join("")}</div>`:""}
    <div class="cta-row" style="margin-top:26px;justify-content:space-between">${lic.length?`<a class="btn m" href="#descargas" data-close>Ir a descargas</a>`:"<span></span>"}<button class="btn m light" id="logout">Cerrar sesión</button></div>`;
-  const lo=$("#logout"); if(lo)lo.onclick=()=>{user=null;acctMode="login";renderAcctBtn();renderDl();renderAccount();toast("Cerraste sesión.")};
+  const lo=$("#logout"); if(lo)lo.onclick=()=>{leaveUser();acctMode="login";renderAcctBtn();renderDl();renderBagBtn();renderAccount();toast("Cerraste sesión. Tu bolsa sigue guardada en tu cuenta.")};
+  const ab=$("#acctBag"); if(ab)ab.onclick=()=>openStore();
 }
 function openAccount(mode){ if(mode)acctMode=mode; renderAccount(); openSheet("acctSheet"); }
 $("#acctBtn").onclick=()=>openAccount();
@@ -335,7 +386,7 @@ function genKey(){const c="ABCDEFGHJKLMNPQRSTUVWXYZ23456789";return "IXG-"+[0,1,
 function startTrial(k){
   if(!user){ pending=()=>startTrial(k); while(stack.length)closeTop(); toast("Crea tu cuenta para empezar la prueba."); openAccount("register"); return; }
   if(!user.licenses.some(l=>l.p===k&&l.trial))user.licenses.push({p:k,n:PROD[k].n,plan:"Prueba de 30 días",key:genKey(),trial:true});
-  renderDl(); while(stack.length)closeTop(); toast(`Prueba de ${PROD[k].n} activada. Descarga el instalador.`);
+  persist(); renderDl(); while(stack.length)closeTop(); toast(`Prueba de ${PROD[k].n} activada. Descarga el instalador.`);
   setTimeout(()=>$("#descargas").scrollIntoView(),120);
 }
 document.addEventListener("click",e=>{const t=e.target.closest("[data-trial]"); if(t){e.preventDefault(); startTrial(t.dataset.trial);}});
@@ -442,7 +493,7 @@ function bindStore(){
   const B=$("#stBody");
   const nx=$("#stNext"); if(nx)nx.onclick=()=>go(st.step+1);
   const bk=$("#stBack"); if(bk)bk.onclick=()=>go(st.step-1);
-  const sw=$("#switchAcct"); if(sw)sw.onclick=()=>{user=null;renderAcctBtn();renderDl();renderStore()};
+  const sw=$("#switchAcct"); if(sw)sw.onclick=()=>{leaveUser();renderAcctBtn();renderDl();renderBagBtn();renderStore()};
   B.querySelectorAll("[data-read]").forEach(b=>b.onclick=()=>{const t=$("#tb-"+b.dataset.read),o=t.hidden;t.hidden=!o;b.textContent=o?"Ocultar":"Leer";b.setAttribute("aria-expanded",o)});
   B.querySelectorAll("[data-term]").forEach(c=>c.onchange=()=>{st.terms[c.dataset.term]=c.checked;refreshTerms()});
   const aa=$("#acceptAll"); if(aa)aa.onclick=()=>{Object.keys(st.terms).forEach(k=>st.terms[k]=true);B.querySelectorAll("[data-term]").forEach(c=>c.checked=true);refreshTerms()};
@@ -459,7 +510,7 @@ document.addEventListener("click",e=>{
   const m=e.target.closest("[data-lm]"); if(m){find(m.dataset.lm).months=+m.dataset.v; syncAll();}
   const r=e.target.closest("[data-lr]"); if(r){const i=bag.findIndex(l=>l.id===+r.dataset.lr); bag.splice(i,1); syncAll(); toast("Se eliminó de tu bolsa.");}
 });
-function syncAll(){ renderBagBtn(); renderBPlans(); renderAddons(); vt(renderStore); }
+function syncAll(){ persist(); renderBagBtn(); renderBPlans(); renderAddons(); vt(renderStore); }
 function refreshTerms(){
   const n=Object.values(st.terms).filter(Boolean).length,p=$("#tProg");
   p.classList.toggle("ok",n===3); p.querySelector("i").style.width=(n/3*100)+"%"; p.lastElementChild.textContent=n===3?"Documentos aceptados":n+" de 3 aceptados";
@@ -484,7 +535,7 @@ function doPay(){
       return{t:i.t,d:i.d,s:lineTotal(l),icon:lineIcon(l),pre:l.type==="addon"}});
     st.last={id:"IX-"+d.getFullYear()+"-"+String(Math.floor(Math.random()*90000)+10000),date:d.toLocaleDateString("es-MX",{day:"numeric",month:"long",year:"numeric"}),
       email:user.email,lines,s:x.s,iva:x.iva,total:x.t,pay:st.pay,payL:{card:"Tarjeta vía pasarela",spei:"Transferencia SPEI",cash:"Efectivo en tiendas",msi:"Meses sin intereses"}[st.pay],fact:st.fact,rfc:st.rfc,uso:st.uso,keys};
-    orders.push(st.last); bag.length=0; renderBagBtn(); renderBPlans(); renderAddons(); renderDl(); go(4);
+    orders.push(st.last); bag.length=0; persist(); renderBagBtn(); renderBPlans(); renderAddons(); renderDl(); go(4);
   },reduce?0:900);
 }
 
