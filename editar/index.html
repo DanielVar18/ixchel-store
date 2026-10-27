@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Editar página · IXCHEL</title>
+<link rel="icon" href="../assets/logo.png" type="image/png">
+<link rel="stylesheet" href="editor.css">
+</head>
+<body>
+<main id="login" class="card">
+  <img src="../assets/logo.png" alt="" class="mark">
+  <h1>Editar la página</h1>
+  <p class="lead">Entran CORA y el médico. Aquí solo se cambian textos e imágenes.</p>
+  <form id="loginForm">
+    <label>Usuario<input name="usuario" autocomplete="username" required></label>
+    <label>Contraseña<input name="password" type="password" autocomplete="current-password" required></label>
+    <p class="err" id="loginErr" hidden></p>
+    <button type="submit">Entrar</button>
+  </form>
+</main>
+
+<div id="app" hidden>
+  <header class="bar">
+    <div><b>IXCHEL</b> <span id="who"></span></div>
+    <div class="bar-actions">
+      <a href="../" target="_blank" rel="noopener">Ver la página</a>
+      <button type="button" id="passBtn">Cambiar contraseña</button>
+      <button type="button" id="outBtn">Salir</button>
+    </div>
+  </header>
+  <div class="wrap">
+    <p class="notice">Puedes modificar textos e imágenes. Los precios, la bolsa, las cuentas de clientes y los pagos no se cambian aquí.</p>
+    <div id="fields"></div>
+    <div class="savebar">
+      <button type="button" id="saveBtn">Guardar textos</button>
+      <p id="saveMsg"></p>
+    </div>
+    <form id="passForm" class="card narrow" hidden>
+      <h2>Cambiar contraseña</h2>
+      <label>Contraseña actual<input name="actual" type="password" required></label>
+      <label>Contraseña nueva<input name="nueva" type="password" required minlength="8"></label>
+      <p class="err" id="passErr" hidden></p>
+      <button type="submit">Actualizar contraseña</button>
+    </form>
+  </div>
+</div>
+<script src="panel.js"></script>
+</body>
+</html>

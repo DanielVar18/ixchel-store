@@ -221,11 +221,12 @@ if("IntersectionObserver" in window){
 }
 
 /* ================= productos ================= */
-$("#soonGrid").innerHTML=SOON.map(k=>`<button class="scard rv" data-prod="${k}"><span class="appicon"><img src="${IMG[k]}" alt=""></span><b>${GO[k].n}</b><span class="d">${GO[k].d}</span><span class="pill soon">Próximamente</span></button>`).join("");
+function soonCard(k){return `<button class="scard rv" data-prod="${k}"><span class="appicon"><img src="${IMG[k]}" alt=""></span><b>${esc(GO[k].n)}</b><span class="d">${esc(cmsVal("go-"+k+"-d",GO[k].d))}</span><span class="pill soon">Próximamente</span></button>`}
+$("#soonGrid").innerHTML=SOON.map(soonCard).join("");
 function openProduct(k){
   const g=GO[k];
   $("#psTitle").textContent=g.n;
-  $("#psBody").innerHTML=`<div class="ps-hero"><span class="appicon"><img src="${IMG[k]}" alt="Logotipo de ${g.n}"></span><span class="pill ${g.ok?"ok":"soon"}">${g.ok?"Disponible":"Próximamente"}</span><h2>${g.n}</h2><p class="tg">${g.tag}</p>${g.ds?`<p class="ds">${g.ds}</p>`:""}</div>
+  $("#psBody").innerHTML=`<div class="ps-hero"><span class="appicon"><img src="${IMG[k]}" alt="Logotipo de ${esc(g.n)}"></span><span class="pill ${g.ok?"ok":"soon"}">${g.ok?"Disponible":"Próximamente"}</span><h2>${esc(g.n)}</h2><p class="tg">${esc(cmsVal("go-"+k+"-tag",g.tag))}</p>${g.ds?`<p class="ds">${esc(cmsVal("go-"+k+"-ds",g.ds))}</p>`:""}</div>
     ${g.ok?`<div class="ps-shot"><img src="${CROP[k]}" alt="Pantalla de ${g.n}"></div>`:""}
     <div class="ps-sec"><h4>${g.ok?"Funciones":"Lo que incluirá"}</h4><div class="fgrid">${g.f.map(([a,b])=>`<div class="fi"><b>${a}</b><span>${b}</span></div>`).join("")}</div></div>
     ${g.ok?`<div class="ps-sec"><h4>Formatos incluidos en el plan básico · ${FORMATS[k].length}</h4><div class="specs">${FORMATS[k].map(f=>`<div><span>${f.n}</span><span style="font-family:var(--mono);font-size:12px;color:var(--petrol)">${f.c}</span></div>`).join("")}</div></div>
@@ -251,10 +252,11 @@ const FEAT=[
  {alt:"Signos vitales con semáforo de IMC",h:"Un semáforo que sí se entiende.",p:"El IMC se clasifica al momento con la referencia de la OMS y la NOM-008. En menores cambia a percentiles.",li:["T/A, FC, FR, temperatura, SpO₂ y glucosa","Condición de la toma: ayuno o posprandial","Pediatría, adolescencia y adulto mayor"]},
  {alt:"Antecedentes con texto generado",h:"Escribes palabras. Obtienes una nota.",p:"Cada apartado genera su propio párrafo clínico, listo para el expediente.",li:["Texto generado editable","Avance por apartado","Limpiar un apartado sin perder el resto"]}
 ];
+function cmsVal(key,fallback){const bag=window.IX_CMS_TEXTS;if(bag&&typeof bag[key]==="string")return bag[key];return fallback}
 function setFeat(i,anim){
   $$("#featTabs button").forEach(b=>b.setAttribute("aria-selected",b.dataset.f==i));
   const f=FEAT[i],img=$("#featImg"),cap=$("#featCap");
-  const apply=()=>{img.src=SHOTS[i];img.alt=f.alt;cap.innerHTML=`<h3>${f.h}</h3><p>${f.p}</p><ul class="checks">${f.li.map(x=>`<li>${x}</li>`).join("")}</ul>`;img.classList.remove("swap");cap.classList.remove("swap")};
+  const apply=()=>{img.src=SHOTS[i];img.alt=cmsVal("feat-"+i+"-alt",f.alt);cap.innerHTML=`<h3>${esc(cmsVal("feat-"+i+"-h",f.h))}</h3><p>${esc(cmsVal("feat-"+i+"-p",f.p))}</p><ul class="checks">${f.li.map((x,n)=>`<li>${esc(cmsVal("feat-"+i+"-l"+n,x))}</li>`).join("")}</ul>`;img.classList.remove("swap");cap.classList.remove("swap")};
   if(!anim||reduce){apply();return} img.classList.add("swap");cap.classList.add("swap");setTimeout(apply,240);
 }
 $$("#featTabs button").forEach(b=>b.addEventListener("click",()=>setFeat(+b.dataset.f,true)));
@@ -572,6 +574,18 @@ document.addEventListener("click",e=>{const c=e.target.closest("[data-copy]"); i
 document.addEventListener("click",e=>{const p=$("#pop"); if(p.classList.contains("on")&&!e.target.closest("#pop")&&!e.target.closest("[data-addplan],[data-addaddon],[data-addbase]"))p.classList.remove("on");});
 
 addEventListener("scroll",()=>{const p=$("#pop"); if(p.classList.contains("on")&&Math.abs(scrollY-(p._y||0))>320)p.classList.remove("on");},{passive:true});
+window.IX_APPLY_MEDIA=function(images){
+  images=images||{};
+  const icons={medigo:"icon-medigo",nursego:"icon-nursego",dentgo:"icon-dentgo",nutrigo:"icon-nutrigo",psicogo:"icon-psicogo",guardiago:"icon-guardiago",campogo:"icon-campogo",evaluago:"icon-evaluago"};
+  Object.entries(icons).forEach(([go,key])=>{if(images[key])IMG[go]=images[key]});
+  ["screen-inicio","screen-ficha","screen-signos","screen-historia"].forEach((key,i)=>{if(images[key])SHOTS[i]=images[key]});
+  if(images["crop-medigo"])CROP.medigo=images["crop-medigo"];
+  if(images["crop-nursego"])CROP.nursego=images["crop-nursego"];
+  const btn=document.querySelector('#featTabs [aria-selected="true"]');
+  if(btn)setFeat(+btn.dataset.f,false);
+  $("#soonGrid").innerHTML=SOON.map(soonCard).join("");
+  renderBPlans(); renderAddons();
+};
 renderAcctBtn(); renderBagBtn(); renderBPlans(); renderCatSeg(); renderCatalog(); renderProfSeg(); renderAddons(); renderDl();
 if(user&&user.token){
   api("session.php",{token:user.token}).then(data=>{

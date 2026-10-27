@@ -4,3 +4,5 @@ Desktop.ini
 api/data/*.sqlite
 api/data/*.sqlite-wal
 api/data/*.sqlite-shm
+assets/uploads/*
+!assets/uploads/.htaccess
